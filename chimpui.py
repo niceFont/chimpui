@@ -1,6 +1,8 @@
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
+import sched
+import time
 import io
 import zipfile
 import os
@@ -8,35 +10,70 @@ import requests
 import re
 
 
-chrome_options = Options()
-chrome_options.add_argument('--headless')
-chrome_options.add_argument('--no-sandbox')
-chrome_options.add_argument('--disable-dev-shm-usage')
-driver = webdriver.Chrome(chrome_options=chrome_options)
+DELAY = None
+DIRECTORY = None
 
-driver.get("https://www.tukui.org/download.php?ui=elvui")
-assert "Tukui" in driver.title, "PROP"
 
-elem = driver.find_element_by_class_name(
-    "btn-large")
+def init_config():
+    with open("chimp.cfg", encoding="utf-8") as file:
+        global DELAY
+        global DIRECTORY
 
-link = elem.get_attribute("href")
+        string = file.read()
+        delaypattern = re.compile(r"(?<=Delay=).*")
+        dirpattern = re.compile(r"(?<=WoWDirectory=).*")
+        found = delaypattern.search(string)
+        DELAY = int(found.group()) if found else 60
+        found = dirpattern.search(string)
+        DIRECTORY = found.group() if found else ""
 
-driver.close()
 
-pattern = re.compile(r"\d+(.)+\d[^.zip]")
-version = pattern.search(link)
+def schedule_event(delay):
+    scheduler = sched.scheduler(time.time, time.sleep)
+    scheduler.enter(delay, 1, update_elvui)
 
-print("ElvUI version %s" % (version.group()))
-print("Downloading Elvui from %s." % (link))
+    scheduler.run()
 
-res = requests.get(link)
 
-print("Extracting Files to current Directory.")
-downzip = zipfile.ZipFile(io.BytesIO(res.content))
+def update_elvui():
+    chrome_options = Options()
+    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    driver = webdriver.Chrome(chrome_options=chrome_options)
 
-downzip.extractall()
+    try:
+        driver.get("https://www.tukui.org/download.php?ui=elvui")
+        assert "Tukui" in driver.title, "PROP"
 
-downzip.close()
+        elem = driver.find_element_by_class_name(
+            "btn-large")
 
-print("Done :  )")
+        link = elem.get_attribute("href")
+
+        driver.close()
+
+        pattern = re.compile(r"\d+(.)+\d[^.zip]")
+        version = pattern.search(link)
+
+        print("ElvUI version %s" % (version.group()))
+        print("Downloading Elvui from %s." % (link))
+
+        res = requests.get(link)
+
+        print("Extracting Files to current Directory.")
+        downzip = zipfile.ZipFile(io.BytesIO(res.content))
+
+        downzip.extractall(path=DIRECTORY)
+
+        downzip.close()
+        print("Done...Process will repeat in %d seconds." % (DELAY))
+        schedule_event(DELAY)
+    except (KeyboardInterrupt, SystemExit):
+        print("Process stopped, goodbye......")
+    except:
+        pass
+
+
+init_config()
+update_elvui()
